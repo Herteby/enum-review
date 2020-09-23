@@ -85,6 +85,25 @@ enum = Enum.create [ ]
                         ]
 
         --
+        , test "Enum is aliased" <|
+            \_ ->
+                """
+module A exposing (..)
+import Enum as E exposing (Enum)
+type Fruit = Apple | Banana | Mango
+enum : Enum Fruit
+enum = E.create [ ]
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "The list passed to Enum.create does not contain all the type constructors for `Fruit`"
+                            , details = [ "It is missing the following constructors:", "Apple", "Banana", "Mango" ]
+                            , under = """enum = E.create [ ]"""
+                            }
+                        ]
+
+        --
         , test "missing type signature" <|
             \_ ->
                 """
