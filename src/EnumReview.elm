@@ -5,6 +5,7 @@ import Elm.Syntax.Declaration as Declaration exposing (Declaration)
 import Elm.Syntax.Expression as Expression exposing (Expression(..), Function)
 import Elm.Syntax.Infix exposing (InfixDirection(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
+import Elm.Syntax.Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
 import Elm.Syntax.TypeAnnotation as TypeAnnotation exposing (TypeAnnotation(..))
 import Review.Rule as Rule exposing (Error, Rule)
@@ -13,14 +14,36 @@ import Set exposing (Set)
 
 rule : Rule
 rule =
-    Rule.newModuleRuleSchema "CorrectEnumDefinitions" initialContext
+    Rule.newProjectRuleSchema "CorrectEnumDefinitions" initialContext
+        |> Rule.withModuleVisitor moduleVisitor
+        |> Rule.withModuleContextUsingContextCreator
+            { fromProjectToModule = Rule.initContextCreator identity
+            , fromModuleToProject = Rule.initContextCreator identity
+            , foldProjectContexts = foldProjectContexts
+            }
+        |> Rule.withContextFromImportedModules
+        |> Rule.fromProjectRuleSchema
+
+
+moduleVisitor : Rule.ModuleRuleSchema {} Context -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } Context
+moduleVisitor schema =
+    schema
         |> Rule.withDeclarationListVisitor declarationListVisitor
         |> Rule.withDeclarationEnterVisitor declarationVisitor
-        |> Rule.fromModuleRuleSchema
+
+
+foldProjectContexts : Context -> Context -> Context
+foldProjectContexts newContext previousContext =
+    { customTypes = Dict.union newContext.customTypes previousContext.customTypes }
+
+
+type Constructors
+    = ConstructorsWithoutArguments (Set String)
+    | ConstructorsWithArguments
 
 
 type alias Context =
-    { customTypes : Dict String (Set String)
+    { customTypes : Dict String Constructors
     }
 
 
@@ -42,17 +65,24 @@ declarationListVisitor declarations context =
         | customTypes =
             declarations
                 |> List.filterMap getCustomType
-                |> List.map (\type_ -> ( Node.value type_.name, typeConstructors type_ ))
+                |> List.map typeConstructors
                 |> Dict.fromList
       }
     )
 
 
-typeConstructors : Type -> Set String
+typeConstructors : Type -> ( String, Constructors )
 typeConstructors type_ =
-    type_.constructors
-        |> List.map (Node.value >> .name >> Node.value)
-        |> Set.fromList
+    ( Node.value type_.name
+    , if List.all (Node.value >> .arguments >> List.isEmpty) type_.constructors then
+        type_.constructors
+            |> List.map (Node.value >> .name >> Node.value)
+            |> Set.fromList
+            |> ConstructorsWithoutArguments
+
+      else
+        ConstructorsWithArguments
+    )
 
 
 getCustomType : Node Declaration -> Maybe Type
@@ -65,58 +95,59 @@ getCustomType node =
             Nothing
 
 
+type StringOrInt
+    = String String
+    | Int Int
 
--- DECLARATION VISITOR
 
-
-getTuples : Node Expression -> Maybe (List ( String, String ))
+getTuples : Expression -> Maybe (List ( StringOrInt, String ))
 getTuples expr =
-    case Node.value expr of
-        Application [ _, Node _ (ListExpr list) ] ->
-            List.map getTuple list |> combine
+    case expr of
+        ListExpr list ->
+            List.map getTuple list |> maybeCombine
 
         _ ->
             Nothing
 
 
-getTuple : Node Expression -> Maybe ( String, String )
+getTuple : Node Expression -> Maybe ( StringOrInt, String )
 getTuple (Node _ value) =
     case value of
-        TupledExpression [ Node _ (Literal stringLiteral), Node _ (FunctionOrValue [] variantName) ] ->
-            Just ( stringLiteral, variantName )
+        TupledExpression [ Node _ key, Node _ (FunctionOrValue [] variantName) ] ->
+            case key of
+                Literal string ->
+                    Just ( String string, variantName )
+
+                Integer int ->
+                    Just ( Int int, variantName )
+
+                _ ->
+                    Nothing
 
         _ ->
             Nothing
 
 
-combine : List (Maybe a) -> Maybe (List a)
-combine =
-    List.foldr (Maybe.map2 (::)) (Just [])
-
-
-o =
-    OperatorApplication "|>"
-        Left
-        (Node { end = { column = 48, row = 5 }, start = { column = 8, row = 5 } } (ListExpr [ Node { end = { column = 26, row = 5 }, start = { column = 10, row = 5 } } (TupledExpression [ Node { end = { column = 18, row = 5 }, start = { column = 11, row = 5 } } (Literal "Apple"), Node { end = { column = 25, row = 5 }, start = { column = 20, row = 5 } } (FunctionOrValue [] "Apple") ]), Node { end = { column = 46, row = 5 }, start = { column = 28, row = 5 } } (TupledExpression [ Node { end = { column = 37, row = 5 }, start = { column = 29, row = 5 } } (Literal "Banana"), Node { end = { column = 45, row = 5 }, start = { column = 39, row = 5 } } (FunctionOrValue [] "Banana") ]) ]))
-        (Node { end = { column = 63, row = 5 }, start = { column = 52, row = 5 } } (FunctionOrValue [ "Enum" ] "create"))
-
-
-findEnumCreate : Node Declaration -> Maybe Function
+findEnumCreate : Node Declaration -> Maybe ( Function, Expression )
 findEnumCreate declaration =
     case Node.value declaration of
         Declaration.FunctionDeclaration function ->
             case function.declaration |> Node.value |> .expression |> Node.value of
-                Application ((Node _ (FunctionOrValue [ "Enum" ] "create")) :: _) ->
-                    Just function
+                Application ((Node _ (FunctionOrValue [ "Enum" ] create)) :: [ Node _ list ]) ->
+                    if create == "create" || create == "createInt" then
+                        Just ( function, list )
 
-                OperatorApplication "|>" Left (Node _ list) (Node _ (FunctionOrValue [ "Enum" ] "create")) ->
-                    Just function
+                    else
+                        Nothing
 
-                other ->
-                    let
-                        _ =
-                            Debug.log "other" other
-                    in
+                OperatorApplication "|>" Left (Node _ list) (Node _ (FunctionOrValue [ "Enum" ] create)) ->
+                    if create == "create" || create == "createInt" then
+                        Just ( function, list )
+
+                    else
+                        Nothing
+
+                _ ->
                     Nothing
 
         _ ->
@@ -126,8 +157,8 @@ findEnumCreate declaration =
 declarationVisitor : Node Declaration -> Context -> ( List (Error {}), Context )
 declarationVisitor declaration context =
     case findEnumCreate declaration of
-        Just function ->
-            case getTypeAnnotation function |> Maybe.andThen getListOfTypeAnnotation of
+        Just ( function, list ) ->
+            case getTypeName function of
                 Nothing ->
                     ( [ Rule.error
                             { message = "Enum definition is missing a type annotation"
@@ -140,13 +171,8 @@ declarationVisitor declaration context =
 
                 Just typeName ->
                     case Dict.get typeName context.customTypes of
-                        Just constructors ->
-                            case
-                                function.declaration
-                                    |> Node.value
-                                    |> .expression
-                                    |> getTuples
-                            of
+                        Just (ConstructorsWithoutArguments constructors) ->
+                            case getTuples list of
                                 Just tuples ->
                                     let
                                         missingConstructors =
@@ -160,9 +186,32 @@ declarationVisitor declaration context =
                                             tuples |> List.map Tuple.second |> duplicates
 
                                         duplicateStrings =
-                                            tuples |> List.map Tuple.first |> duplicates
+                                            tuples
+                                                |> List.filterMap
+                                                    (\( key, _ ) ->
+                                                        case key of
+                                                            String str ->
+                                                                Just str
+
+                                                            Int _ ->
+                                                                Nothing
+                                                    )
+                                                |> duplicates
+
+                                        duplicateInts =
+                                            tuples
+                                                |> List.filterMap
+                                                    (\( key, _ ) ->
+                                                        case key of
+                                                            Int int ->
+                                                                Just int
+
+                                                            String _ ->
+                                                                Nothing
+                                                    )
+                                                |> duplicates
                                     in
-                                    if not <| List.isEmpty missingConstructors then
+                                    if missingConstructors /= [] then
                                         ( [ Rule.error
                                                 { message = "The list passed to Enum.create does not contain all the type constructors for `" ++ typeName ++ "`"
                                                 , details = "It is missing the following constructors:" :: missingConstructors
@@ -172,7 +221,7 @@ declarationVisitor declaration context =
                                         , context
                                         )
 
-                                    else if not <| List.isEmpty duplicateStrings then
+                                    else if duplicateStrings /= [] then
                                         ( [ Rule.error
                                                 { message = "The list passed to Enum.create contains duplicate Strings:"
                                                 , details = List.map (\str -> "\"" ++ str ++ "\"") duplicateStrings
@@ -182,7 +231,17 @@ declarationVisitor declaration context =
                                         , context
                                         )
 
-                                    else if not <| List.isEmpty duplicateConstructors then
+                                    else if duplicateInts /= [] then
+                                        ( [ Rule.error
+                                                { message = "The list passed to Enum.createInt contains duplicate Ints:"
+                                                , details = List.map String.fromInt duplicateInts
+                                                }
+                                                (Node.range function.declaration)
+                                          ]
+                                        , context
+                                        )
+
+                                    else if duplicateConstructors /= [] then
                                         ( [ Rule.error
                                                 { message = "The list passed to Enum.create contains duplicate constructors:"
                                                 , details = duplicateConstructors
@@ -198,44 +257,76 @@ declarationVisitor declaration context =
 
                                 Nothing ->
                                     --unexpected structure, couldn't find tuple list
-                                    ( [], context )
+                                    ( [ Rule.error
+                                            { message = "Unexpected structure"
+                                            , details = [ ":(" ]
+                                            }
+                                            (Node.range function.declaration)
+                                      ]
+                                    , context
+                                    )
+
+                        Just ConstructorsWithArguments ->
+                            ( [ Rule.error
+                                    { message = "One of the variants of `" ++ typeName ++ "` has an argument"
+                                    , details = [ "Enum.create is intended to only be used with simple enum-like types" ]
+                                    }
+                                    (Node.range function.declaration)
+                              ]
+                            , context
+                            )
 
                         Nothing ->
                             -- couldn't find type definition
-                            ( [], context )
+                            ( [ Rule.error
+                                    { message = "Couldn't find the type definition for `" ++ typeName ++ "`"
+                                    , details = [ "Where did you hide it?" ]
+                                    }
+                                    (Node.range function.declaration)
+                              ]
+                            , context
+                            )
 
         Nothing ->
             -- ignore, not an Enum definition
             ( [], context )
 
 
-getTypeAnnotation : Expression.Function -> Maybe TypeAnnotation
-getTypeAnnotation function =
+getTypeName : Expression.Function -> Maybe String
+getTypeName function =
     function.signature
         |> Maybe.map (Node.value >> .typeAnnotation >> Node.value)
+        |> Maybe.andThen
+            (\annotation ->
+                case annotation of
+                    TypeAnnotation.Typed typeNode (parameterNode :: []) ->
+                        case ( Node.value typeNode, Node.value parameterNode ) of
+                            ( ( [], enumType ), TypeAnnotation.Typed parameter _ ) ->
+                                if enumType == "Enum" || enumType == "EnumInt" then
+                                    case Node.value parameter of
+                                        ( [], typeName ) ->
+                                            Just typeName
+
+                                        _ ->
+                                            Nothing
+
+                                else
+                                    Nothing
+
+                            _ ->
+                                Nothing
+
+                    _ ->
+                        Nothing
+            )
 
 
-getListOfTypeAnnotation : TypeAnnotation -> Maybe String
-getListOfTypeAnnotation typeAnnotation =
-    case typeAnnotation of
-        TypeAnnotation.Typed typeNode (parameterNode :: []) ->
-            case ( Node.value typeNode, Node.value parameterNode ) of
-                ( ( [], "Enum" ), TypeAnnotation.Typed parameter _ ) ->
-                    case Node.value parameter of
-                        ( [], typeName ) ->
-                            Just typeName
-
-                        _ ->
-                            Nothing
-
-                _ ->
-                    Nothing
-
-        _ ->
-            Nothing
+maybeCombine : List (Maybe a) -> Maybe (List a)
+maybeCombine =
+    List.foldr (Maybe.map2 (::)) (Just [])
 
 
-duplicates : List String -> List String
+duplicates : List comparable -> List comparable
 duplicates list =
     let
         recurse dupes l =

@@ -20,6 +20,48 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
                     |> Review.Test.expectNoErrors
 
         --
+        , test "valid, pipe" <|
+            \_ ->
+                """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango
+enum : Enum Fruit
+enum = [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ] |> Enum.create
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectNoErrors
+
+        --
+        , test "valid, EnumInt" <|
+            \_ ->
+                """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango
+enum : EnumInt Fruit
+enum = Enum.createInt [ (1, Apple), (2, Banana), (3, Mango) ]
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectNoErrors
+
+        --
+        , test "duplicate number, EnumInt" <|
+            \_ ->
+                """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango
+enum : EnumInt Fruit
+enum = Enum.createInt [ (1, Apple), (2, Banana), (2, Mango) ]
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "The list passed to Enum.createInt contains duplicate Ints:"
+                            , details = [ "2" ]
+                            , under = """enum = Enum.createInt [ (1, Apple), (2, Banana), (2, Mango) ]"""
+                            }
+                        ]
+
+        --
         , test "empty list" <|
             \_ ->
                 """
@@ -123,4 +165,41 @@ enum = [ ("Apple", Apple), ("Banana", Banana) ] |> Enum.create
                             , under = """enum = [ ("Apple", Apple), ("Banana", Banana) ] |> Enum.create"""
                             }
                         ]
+
+        --
+        , test "Mango has an argument" <|
+            \_ ->
+                """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango Int
+enum : Enum Fruit
+enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango 0) ]
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "One of the variants of `Fruit` has an argument"
+                            , details = [ "Enum.create is intended to only be used with simple enum-like types" ]
+                            , under = """enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango 0) ]"""
+                            }
+                        ]
+
+        --
+        , test "type definition is in another module, valid" <|
+            \_ ->
+                [ """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango
+"""
+                , """
+module B exposing (..)
+import A exposing (Fruit(..))
+enum : Enum Fruit
+enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
+"""
+                ]
+                    |> Review.Test.runOnModules rule
+                    |> Review.Test.expectNoErrors
+
+        --
         ]
