@@ -9,7 +9,7 @@ import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
 import Elm.Syntax.TypeAnnotation as TypeAnnotation exposing (TypeAnnotation(..))
-import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable)
+import Review.ModuleNameLookupTable as ModuleNameLookupTable exposing (ModuleNameLookupTable)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
 
@@ -167,15 +167,16 @@ findEnumCreate lookupTable declaration =
     case Node.value declaration of
         Declaration.FunctionDeclaration function ->
             case function.declaration |> Node.value |> .expression |> Node.value of
-                Application ((Node _ (FunctionOrValue [ "Enum" ] create)) :: [ Node _ list ]) ->
-                    if create == "create" || create == "createInt" then
+                Application (calledFunction :: [ Node _ list ]) ->
+                    -- TODO Need to report an error if there are no arguments to the call
+                    if isCreateFunction lookupTable calledFunction then
                         Just ( function, list )
 
                     else
                         Nothing
 
-                OperatorApplication "|>" Left (Node _ list) (Node _ (FunctionOrValue [ "Enum" ] create)) ->
-                    if create == "create" || create == "createInt" then
+                OperatorApplication "|>" Left (Node _ list) rightExpression ->
+                    if isCreateFunction lookupTable rightExpression then
                         Just ( function, list )
 
                     else
@@ -186,6 +187,25 @@ findEnumCreate lookupTable declaration =
 
         _ ->
             Nothing
+
+
+isCreateFunction : ModuleNameLookupTable -> Node Expression -> Bool
+isCreateFunction lookupTable node =
+    case Node.value node of
+        Expression.FunctionOrValue _ name ->
+            if name == "create" || name == "createInt" then
+                case ModuleNameLookupTable.moduleNameFor lookupTable node of
+                    Just [ "Enum" ] ->
+                        True
+
+                    _ ->
+                        False
+
+            else
+                False
+
+        _ ->
+            False
 
 
 declarationVisitor : Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
@@ -336,6 +356,7 @@ getTypeName function =
                     TypeAnnotation.Typed typeNode (parameterNode :: []) ->
                         case ( Node.value typeNode, Node.value parameterNode ) of
                             ( ( [], enumType ), TypeAnnotation.Typed parameter _ ) ->
+                                -- TODO Handle multiple ways of importing Enum/EnumInt
                                 if enumType == "Enum" || enumType == "EnumInt" then
                                     case Node.value parameter of
                                         ( [], typeName ) ->
