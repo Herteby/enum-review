@@ -9,6 +9,7 @@ import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
 import Elm.Syntax.TypeAnnotation as TypeAnnotation exposing (TypeAnnotation(..))
+import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
 
@@ -36,11 +37,13 @@ moduleVisitor schema =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\projectContext ->
-            { customTypes = projectContext.customTypes
+        (\lookupTable projectContext ->
+            { lookupTable = lookupTable
+            , customTypes = projectContext.customTypes
             , localTypes = Dict.empty
             }
         )
+        |> Rule.withModuleNameLookupTable
 
 
 fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
@@ -72,7 +75,8 @@ type alias ProjectContext =
 
 
 type alias ModuleContext =
-    { customTypes : Dict ModuleName (Dict String Constructors)
+    { lookupTable : ModuleNameLookupTable
+    , customTypes : Dict ModuleName (Dict String Constructors)
     , localTypes : Dict String Constructors
     }
 
