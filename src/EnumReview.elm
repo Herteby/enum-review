@@ -162,8 +162,8 @@ getTuple (Node _ value) =
             Nothing
 
 
-findEnumCreate : Node Declaration -> Maybe ( Function, Expression )
-findEnumCreate declaration =
+findEnumCreate : ModuleNameLookupTable -> Node Declaration -> Maybe ( Function, Expression )
+findEnumCreate lookupTable declaration =
     case Node.value declaration of
         Declaration.FunctionDeclaration function ->
             case function.declaration |> Node.value |> .expression |> Node.value of
@@ -190,7 +190,7 @@ findEnumCreate declaration =
 
 declarationVisitor : Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
 declarationVisitor declaration context =
-    case findEnumCreate declaration of
+    case findEnumCreate context.lookupTable declaration of
         Just ( function, list ) ->
             case getTypeName function of
                 Nothing ->
