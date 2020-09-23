@@ -12,6 +12,7 @@ all =
             \_ ->
                 """
 module A exposing (..)
+import Enum
 type Fruit = Apple | Banana | Mango
 enum : Enum Fruit
 enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
@@ -24,6 +25,7 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
             \_ ->
                 """
 module A exposing (..)
+import Enum
 type Fruit = Apple | Banana | Mango
 enum : Enum Fruit
 enum = [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ] |> Enum.create
@@ -36,6 +38,7 @@ enum = [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ] |> Enum.create
             \_ ->
                 """
 module A exposing (..)
+import Enum
 type Fruit = Apple | Banana | Mango
 enum : EnumInt Fruit
 enum = Enum.createInt [ (1, Apple), (2, Banana), (3, Mango) ]
@@ -48,6 +51,7 @@ enum = Enum.createInt [ (1, Apple), (2, Banana), (3, Mango) ]
             \_ ->
                 """
 module A exposing (..)
+import Enum
 type Fruit = Apple | Banana | Mango
 enum : EnumInt Fruit
 enum = Enum.createInt [ (1, Apple), (2, Banana), (2, Mango) ]
@@ -66,6 +70,7 @@ enum = Enum.createInt [ (1, Apple), (2, Banana), (2, Mango) ]
             \_ ->
                 """
 module A exposing (..)
+import Enum exposing (Enum)
 type Fruit = Apple | Banana | Mango
 enum : Enum Fruit
 enum = Enum.create [ ]
@@ -80,10 +85,30 @@ enum = Enum.create [ ]
                         ]
 
         --
+        , test "Enum is aliased" <|
+            \_ ->
+                """
+module A exposing (..)
+import Enum as E exposing (Enum)
+type Fruit = Apple | Banana | Mango
+enum : Enum Fruit
+enum = E.create [ ]
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "The list passed to Enum.create does not contain all the type constructors for `Fruit`"
+                            , details = [ "It is missing the following constructors:", "Apple", "Banana", "Mango" ]
+                            , under = """enum = E.create [ ]"""
+                            }
+                        ]
+
+        --
         , test "missing type signature" <|
             \_ ->
                 """
 module A exposing (..)
+import Enum exposing (Enum)
 type Fruit = Apple | Banana | Mango
 enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
 """
@@ -117,6 +142,7 @@ enum = Enum.create [ ("Apple", Apple) ]
             \_ ->
                 """
 module A exposing (..)
+import Enum exposing (Enum)
 type Fruit = Apple | Banana | Mango
 enum : Enum Fruit
 enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango), ("Mango2", Mango) ]
@@ -135,6 +161,7 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango), ("M
             \_ ->
                 """
 module A exposing (..)
+import Enum exposing (Enum)
 type Fruit = Apple | Banana | Mango
 enum : Enum Fruit
 enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Banana", Mango) ]
@@ -153,6 +180,7 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Banana", Mango) ]
             \_ ->
                 """
 module A exposing (..)
+import Enum exposing (Enum)
 type Fruit = Apple | Banana | Mango
 enum : Enum Fruit
 enum = [ ("Apple", Apple), ("Banana", Banana) ] |> Enum.create
@@ -171,6 +199,7 @@ enum = [ ("Apple", Apple), ("Banana", Banana) ] |> Enum.create
             \_ ->
                 """
 module A exposing (..)
+import Enum exposing (Enum)
 type Fruit = Apple | Banana | Mango Int
 enum : Enum Fruit
 enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango 0) ]
@@ -193,6 +222,7 @@ type Fruit = Apple | Banana | Mango
 """
                 , """
 module B exposing (..)
+import Enum exposing (Enum)
 import A exposing (Fruit(..))
 enum : Enum Fruit
 enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
