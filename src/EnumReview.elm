@@ -4,6 +4,7 @@ import Dict exposing (Dict)
 import Elm.Syntax.Declaration as Declaration exposing (Declaration)
 import Elm.Syntax.Expression as Expression exposing (Expression(..), Function)
 import Elm.Syntax.Infix exposing (InfixDirection(..))
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
@@ -17,8 +18,8 @@ rule =
     Rule.newProjectRuleSchema "CorrectEnumDefinitions" initialContext
         |> Rule.withModuleVisitor moduleVisitor
         |> Rule.withModuleContextUsingContextCreator
-            { fromProjectToModule = Rule.initContextCreator identity
-            , fromModuleToProject = Rule.initContextCreator identity
+            { fromProjectToModule = fromProjectToModule
+            , fromModuleToProject = fromModuleToProject
             , foldProjectContexts = foldProjectContexts
             }
         |> Rule.withContextFromImportedModules
@@ -32,6 +33,29 @@ moduleVisitor schema =
         |> Rule.withDeclarationEnterVisitor declarationVisitor
 
 
+fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
+fromProjectToModule =
+    Rule.initContextCreator
+        (\projectContext ->
+            { customTypes = projectContext.customTypes
+            , localTypes = Dict.empty
+            }
+        )
+
+
+fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
+fromModuleToProject =
+    Rule.initContextCreator
+        (\metadata moduleContext ->
+            { customTypes =
+                Dict.singleton
+                    (Rule.moduleNameFromMetadata metadata)
+                    moduleContext.localTypes
+            }
+        )
+        |> Rule.withMetadata
+
+
 foldProjectContexts : ProjectContext -> ProjectContext -> ProjectContext
 foldProjectContexts newContext previousContext =
     { customTypes = Dict.union newContext.customTypes previousContext.customTypes }
@@ -43,12 +67,13 @@ type Constructors
 
 
 type alias ProjectContext =
-    { customTypes : Dict String Constructors
+    { customTypes : Dict ModuleName (Dict String Constructors)
     }
 
 
 type alias ModuleContext =
-    { customTypes : Dict String Constructors
+    { customTypes : Dict ModuleName (Dict String Constructors)
+    , localTypes : Dict String Constructors
     }
 
 
@@ -67,7 +92,7 @@ declarationListVisitor declarations context =
     -- Here we wish to find the custom types that were defined in the module, and store them in the context.
     ( []
     , { context
-        | customTypes =
+        | localTypes =
             declarations
                 |> List.filterMap getCustomType
                 |> List.map typeConstructors
@@ -175,7 +200,7 @@ declarationVisitor declaration context =
                     )
 
                 Just typeName ->
-                    case Dict.get typeName context.customTypes of
+                    case Dict.get typeName context.localTypes of
                         Just (ConstructorsWithoutArguments constructors) ->
                             case getTuples list of
                                 Just tuples ->
