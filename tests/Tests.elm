@@ -20,6 +20,24 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango) ]
                     |> Review.Test.expectNoErrors
 
         --
+        , test "empty list" <|
+            \_ ->
+                """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango
+enum : Enum Fruit
+enum = Enum.create [ ]
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "The list passed to Enum.create does not contain all the type constructors for `Fruit`"
+                            , details = [ "It is missing the following constructors:", "Apple", "Banana", "Mango" ]
+                            , under = """enum = Enum.create [ ]"""
+                            }
+                        ]
+
+        --
         , test "missing type signature" <|
             \_ ->
                 """
@@ -49,11 +67,7 @@ enum = Enum.create [ ("Apple", Apple) ]
                     |> Review.Test.expectErrors
                         [ Review.Test.error
                             { message = "The list passed to Enum.create does not contain all the type constructors for `Fruit`"
-                            , details =
-                                [ """It is missing the following constructors:
- - Banana
- - Mango"""
-                                ]
+                            , details = [ "It is missing the following constructors:", "Banana", "Mango" ]
                             , under = """enum = Enum.create [ ("Apple", Apple) ]"""
                             }
                         ]
@@ -69,10 +83,7 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango), ("M
                     |> Review.Test.expectErrors
                         [ Review.Test.error
                             { message = "The list passed to Enum.create contains duplicate constructors:"
-                            , details =
-                                [ """
- - Mango"""
-                                ]
+                            , details = [ "Mango" ]
                             , under = """enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Mango", Mango), ("Mango2", Mango) ]"""
                             }
                         ]
@@ -90,11 +101,26 @@ enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Banana", Mango) ]
                     |> Review.Test.expectErrors
                         [ Review.Test.error
                             { message = "The list passed to Enum.create contains duplicate Strings:"
-                            , details =
-                                [ "\n - \"Banana\"" ]
+                            , details = [ "\"Banana\"" ]
                             , under = """enum = Enum.create [ ("Apple", Apple), ("Banana", Banana), ("Banana", Mango) ]"""
                             }
                         ]
 
         --
+        , test "pipe, missing Mango" <|
+            \_ ->
+                """
+module A exposing (..)
+type Fruit = Apple | Banana | Mango
+enum : Enum Fruit
+enum = [ ("Apple", Apple), ("Banana", Banana) ] |> Enum.create
+"""
+                    |> Review.Test.run rule
+                    |> Review.Test.expectErrors
+                        [ Review.Test.error
+                            { message = "The list passed to Enum.create does not contain all the type constructors for `Fruit`"
+                            , details = [ "It is missing the following constructors:", "Mango" ]
+                            , under = """enum = [ ("Apple", Apple), ("Banana", Banana) ] |> Enum.create"""
+                            }
+                        ]
         ]
