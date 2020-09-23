@@ -25,14 +25,14 @@ rule =
         |> Rule.fromProjectRuleSchema
 
 
-moduleVisitor : Rule.ModuleRuleSchema {} Context -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } Context
+moduleVisitor : Rule.ModuleRuleSchema {} ModuleContext -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor schema =
     schema
         |> Rule.withDeclarationListVisitor declarationListVisitor
         |> Rule.withDeclarationEnterVisitor declarationVisitor
 
 
-foldProjectContexts : Context -> Context -> Context
+foldProjectContexts : ProjectContext -> ProjectContext -> ProjectContext
 foldProjectContexts newContext previousContext =
     { customTypes = Dict.union newContext.customTypes previousContext.customTypes }
 
@@ -42,12 +42,17 @@ type Constructors
     | ConstructorsWithArguments
 
 
-type alias Context =
+type alias ProjectContext =
     { customTypes : Dict String Constructors
     }
 
 
-initialContext : Context
+type alias ModuleContext =
+    { customTypes : Dict String Constructors
+    }
+
+
+initialContext : ProjectContext
 initialContext =
     { customTypes = Dict.empty
     }
@@ -57,7 +62,7 @@ initialContext =
 -- DECLARATION LIST VISITOR
 
 
-declarationListVisitor : List (Node Declaration) -> Context -> ( List nothing, Context )
+declarationListVisitor : List (Node Declaration) -> ModuleContext -> ( List nothing, ModuleContext )
 declarationListVisitor declarations context =
     -- Here we wish to find the custom types that were defined in the module, and store them in the context.
     ( []
@@ -154,7 +159,7 @@ findEnumCreate declaration =
             Nothing
 
 
-declarationVisitor : Node Declaration -> Context -> ( List (Error {}), Context )
+declarationVisitor : Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
 declarationVisitor declaration context =
     case findEnumCreate declaration of
         Just ( function, list ) ->
